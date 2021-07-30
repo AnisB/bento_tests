@@ -1,4 +1,5 @@
 // SDK includes
+#include <bento_base/log.h>
 #include <bento_base/security.h>
 #include <bento_memory/common.h>
 #include <bento_memory/system_allocator.h>
