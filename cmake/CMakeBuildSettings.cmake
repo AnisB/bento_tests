@@ -56,7 +56,7 @@ macro(define_plaform_settings)
 		add_compile_options(-fno-rtti)
 
 		# Enable SIMD instructions (SSE3)
-		add_compile_options(-msse3)
+		# add_compile_options(-msse3)
 
 		# Disable specific warnings
 		add_compile_options(-Wno-parentheses -Wno-reorder -Wno-missing-braces -Wno-unused-private-field -Wno-return-type-c-linkage -Wno-narrowing)
