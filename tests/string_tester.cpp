@@ -6,6 +6,8 @@
 
 int main()
 {
+	bento::default_logger()->log(LogLevel:info, "TESTS", "Runnning string tests.");
+
 	bento::SystemAllocator allocator;
 	{
 		bento::DynamicString str(allocator);
@@ -57,6 +59,8 @@ int main()
 		bento::string::replace_substring(source, "__", "/", destination);
 		assert(destination == "C:/_Bijour/Je/Mappelle/");
 	}
+
+	bento::default_logger()->log(LogLevel:info, "TESTS", "Allocators string succeded.");
 
 	return 0;
 }
