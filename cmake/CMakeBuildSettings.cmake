@@ -59,7 +59,7 @@ macro(define_plaform_settings)
 		# add_compile_options(-msse3)
 
 		# Disable specific warnings
-		add_compile_options(-Wno-parentheses -Wno-reorder -Wno-missing-braces -Wno-unused-private-field -Wno-return-type-c-linkage -Wno-narrowing)
+		add_compile_options(-Wno-parentheses -Wno-reorder -Wno-missing-braces -Wno-narrowing)
 
 		# Treat all other warnings as errors
 		add_compile_options(-Werror)
