@@ -35,6 +35,7 @@ void test_page_allocator()
 	// Create an allocator that allocates 16 bytes per chunk
 	bento::PageAllocator pageAllocator;
 	pageAllocator.initialize(16);
+	assert(pageAllocator.memory_footprint() == (16 * 64));
 
 	// Tests that the structure size correctly accounts for the allocation size
 	{
@@ -117,13 +118,21 @@ void test_page_allocator()
 void test_book_allocator()
 {
 	bento::BookAllocator bookAllocator;
-	bookAllocator.initialize(4, 16);
+	bento::book_allocator::initialize(bookAllocator, 4, 16);
 
 	// Grab the 4 pages for checks
 	bento::PageAllocator& page0 = bookAllocator.get_page_allocator(0);
 	bento::PageAllocator& page1 = bookAllocator.get_page_allocator(1);
 	bento::PageAllocator& page2 = bookAllocator.get_page_allocator(2);
 	bento::PageAllocator& page3 = bookAllocator.get_page_allocator(3);
+
+	// Check the memory footprint
+	uint32_t headerSize = bookAllocator.header_size();
+	assert(page0.memory_footprint() == ((4 + headerSize) * 64));
+	assert(page1.memory_footprint() == ((8 + headerSize) * 64));
+	assert(page2.memory_footprint() == ((12 + headerSize) * 64));
+	assert(page3.memory_footprint() == ((16 + headerSize) * 64));
+	assert(bookAllocator.memory_footprint() == ((4 + 8 + 12 + 16 + headerSize * 4) * 64));
 
 	// Test that the allocations fall into the right page (if can)
 	{
