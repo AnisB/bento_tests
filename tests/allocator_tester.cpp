@@ -244,7 +244,7 @@ void test_book_allocator()
 
 int main()
 {
-	bento::default_logger()->log(LogLevel:info, "TESTS", "Runnning allocators tests.");
+	bento::default_logger()->log(bento::LogLevel::info, "TESTS", "Runnning allocators tests.");
 
 	// Run the page allocator tests
 	test_page_allocator();
@@ -252,7 +252,7 @@ int main()
 	// Run the book allocator tests
 	test_book_allocator();
 
-	bento::default_logger()->log(LogLevel:info, "TESTS", "Allocators tests succeded.");
+	bento::default_logger()->log(bento::LogLevel::info, "TESTS", "Allocators tests succeded.");
 	// If we got here, everything is fine
 	return 0;
 }

@@ -6,7 +6,7 @@
 
 int main()
 {
-	bento::default_logger()->log(LogLevel:info, "TESTS", "Runnning string tests.");
+	bento::default_logger()->log(bento::LogLevel::info, "TESTS", "Runnning string tests.");
 
 	bento::SystemAllocator allocator;
 	{
@@ -60,7 +60,7 @@ int main()
 		assert(destination == "C:/_Bijour/Je/Mappelle/");
 	}
 
-	bento::default_logger()->log(LogLevel:info, "TESTS", "Allocators string succeded.");
+	bento::default_logger()->log(bento::LogLevel::info, "TESTS", "Allocators string succeded.");
 
 	return 0;
 }
