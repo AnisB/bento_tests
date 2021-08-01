@@ -4,6 +4,7 @@
 #include <bento_memory/common.h>
 #include <bento_memory/page_allocator.h>
 #include <bento_memory/book_allocator.h>
+#include <bento_memory/safe_system_allocator.h>
 
 struct TByte4
 {
@@ -252,9 +253,94 @@ void test_book_allocator()
 	}
 }
 
+void assert_memory_usage(bento::SafeSystemAllocator& allocator, uint32_t current, uint32_t total_allocated, uint32_t total_freed)
+{
+	assert(allocator.current_allocated_memory() == current);
+	assert(allocator.total_memory_allocated() == total_allocated);
+	assert(allocator.total_freed_memory() == total_freed);
+}
+
+void test_safe_system_allocator()
+{
+	{
+		bento::SafeSystemAllocator safeMemoryAllocator;
+		assert_memory_usage(safeMemoryAllocator, 0, 0, 0);
+		uint32_t headerSize = safeMemoryAllocator.header_size();
+
+		TByte4* c4 = bento::make_new<TByte4>(safeMemoryAllocator);
+		assert_memory_usage(safeMemoryAllocator, (sizeof(TByte4) + headerSize), (sizeof(TByte4) + headerSize), 0);
+
+		TByte8* c8 = bento::make_new<TByte8>(safeMemoryAllocator);
+		assert_memory_usage(safeMemoryAllocator, (sizeof(TByte4) + sizeof(TByte8) + headerSize * 2), (sizeof(TByte4) + sizeof(TByte8) + headerSize * 2), 0);
+
+		TByte32* c32 = bento::make_new<TByte32>(safeMemoryAllocator);
+		assert_memory_usage(safeMemoryAllocator, (sizeof(TByte4) + sizeof(TByte8) + sizeof(TByte32) + headerSize * 3), (sizeof(TByte4) + sizeof(TByte8) + sizeof(TByte32) + headerSize * 3), 0);
+
+		bento::make_delete<TByte4>(safeMemoryAllocator, c4);
+		assert_memory_usage(safeMemoryAllocator, (sizeof(TByte8) + sizeof(TByte32) + headerSize * 2), (sizeof(TByte4) + sizeof(TByte8) + sizeof(TByte32) + headerSize * 3), sizeof(TByte4) + headerSize);
+
+		bento::make_delete<TByte8>(safeMemoryAllocator, c8);
+		assert_memory_usage(safeMemoryAllocator, (sizeof(TByte32) + headerSize), (sizeof(TByte4) + sizeof(TByte8) + sizeof(TByte32) + headerSize * 3), (sizeof(TByte4) + sizeof(TByte8) + headerSize * 2));
+
+		bento::make_delete<TByte32>(safeMemoryAllocator, c32);
+		assert_memory_usage(safeMemoryAllocator, 0, (sizeof(TByte4) + sizeof(TByte8) + sizeof(TByte32) + headerSize * 3), (sizeof(TByte4) + sizeof(TByte8) + sizeof(TByte32) + headerSize * 3));
+	}
+
+	{
+		bento::SafeSystemAllocator safeMemoryAllocator;
+		assert_memory_usage(safeMemoryAllocator, 0, 0, 0);
+		uint32_t headerSize = safeMemoryAllocator.header_size();
+
+		TByte4* c4 = bento::make_new<TByte4>(safeMemoryAllocator);
+		assert_memory_usage(safeMemoryAllocator, (sizeof(TByte4) + headerSize), (sizeof(TByte4) + headerSize), 0);
+
+		bento::make_delete<TByte4>(safeMemoryAllocator, c4);
+		assert_memory_usage(safeMemoryAllocator, 0, (sizeof(TByte4) + headerSize), (sizeof(TByte4) + headerSize));
+
+		TByte8* c8 = bento::make_new<TByte8>(safeMemoryAllocator);
+		assert_memory_usage(safeMemoryAllocator, (sizeof(TByte8) + headerSize), (sizeof(TByte4) + sizeof(TByte8) + headerSize * 2), (sizeof(TByte4) + headerSize));
+
+		bento::make_delete<TByte8>(safeMemoryAllocator, c8);
+		assert_memory_usage(safeMemoryAllocator, 0, (sizeof(TByte4) + sizeof(TByte8) + headerSize * 2), (sizeof(TByte4) + sizeof(TByte8) + headerSize * 2));
+
+		TByte32* c32 = bento::make_new<TByte32>(safeMemoryAllocator);
+		assert_memory_usage(safeMemoryAllocator, (sizeof(TByte32) + headerSize), (sizeof(TByte4) + sizeof(TByte8) + sizeof(TByte32) + headerSize * 3), (sizeof(TByte4) + sizeof(TByte8) + headerSize * 2));
+
+		bento::make_delete<TByte32>(safeMemoryAllocator, c32);
+		assert_memory_usage(safeMemoryAllocator, 0, (sizeof(TByte4) + sizeof(TByte8) + sizeof(TByte32) + headerSize * 3), (sizeof(TByte4) + sizeof(TByte8) + sizeof(TByte32) + headerSize * 3));
+	}
+
+	{
+		bento::SafeSystemAllocator safeMemoryAllocator;
+		assert_memory_usage(safeMemoryAllocator, 0, 0, 0);
+		uint32_t headerSize = safeMemoryAllocator.header_size();
+
+		bento::Vector<TByte4> vc4(safeMemoryAllocator);
+		bento::Vector<TByte8> vc8(safeMemoryAllocator);
+		bento::Vector<TByte16> vc16(safeMemoryAllocator);
+
+		vc4.resize(4);
+		assert_memory_usage(safeMemoryAllocator, (sizeof(TByte4) * 4 + headerSize), (sizeof(TByte4) * 4 + headerSize), 0);
+		vc8.resize(4);
+		assert_memory_usage(safeMemoryAllocator, (sizeof(TByte4) * 4 + sizeof(TByte8) * 4 + headerSize * 2), (sizeof(TByte4) * 4 + sizeof(TByte8) * 4 + headerSize * 2), 0);
+		vc16.resize(4);
+		assert_memory_usage(safeMemoryAllocator, (sizeof(TByte4) * 4 + sizeof(TByte8) * 4 + sizeof(TByte16) * 4 + headerSize * 3), (sizeof(TByte4) * 4 + sizeof(TByte8) * 4 + sizeof(TByte16) * 4 + headerSize * 3), 0);
+
+		vc4.free();
+		vc4.resize(8);
+		assert_memory_usage(safeMemoryAllocator, (sizeof(TByte4) * 8 + sizeof(TByte8) * 4 + sizeof(TByte16) * 4 + headerSize * 3), (sizeof(TByte4) * 12 + sizeof(TByte8) * 4 + sizeof(TByte16) * 4 + headerSize * 4), (sizeof(TByte4) * 4 + headerSize));
+		vc8.free();
+		vc8.resize(8);
+		assert_memory_usage(safeMemoryAllocator, (sizeof(TByte4) * 8 + sizeof(TByte8) * 8 + sizeof(TByte16) * 4 + headerSize * 3), (sizeof(TByte4) * 12 + sizeof(TByte8) * 12 + sizeof(TByte16) * 4 + headerSize * 5), (sizeof(TByte4) * 4 + sizeof(TByte8) * 4 + headerSize * 2 ));
+		vc16.free();
+		vc16.resize(8);
+		assert_memory_usage(safeMemoryAllocator, (sizeof(TByte4) * 8 + sizeof(TByte8) * 8 + sizeof(TByte16) * 8 + headerSize * 3), (sizeof(TByte4) * 12 + sizeof(TByte8) * 12 + sizeof(TByte16) * 12 + headerSize * 6), (sizeof(TByte4) * 4 + sizeof(TByte8) * 4 + sizeof(TByte16) * 4 + headerSize * 3));
+	}
+}
+
 int main()
 {
-	bento::default_logger()->log(bento::LogLevel::info, "TESTS", "Runnning allocators tests.");
+	bento::default_logger()->log(bento::LogLevel::info, "TESTS", "Running allocators tests.");
 
 	// Run the page allocator tests
 	test_page_allocator();
@@ -262,7 +348,11 @@ int main()
 	// Run the book allocator tests
 	test_book_allocator();
 
-	bento::default_logger()->log(bento::LogLevel::info, "TESTS", "Allocators tests succeded.");
+	// Run the book allocator tests
+	test_safe_system_allocator();
+
+	bento::default_logger()->log(bento::LogLevel::info, "TESTS", "Allocators tests succeeded.");
+
 	// If we got here, everything is fine
 	return 0;
 }
