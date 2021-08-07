@@ -38,3 +38,9 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_OUTPUT_DIRECTORY}/bin/${PROJECT_PLA
 if( PLATFORM_WINDOWS )
 	set(CMAKE_VS_INCLUDE_INSTALL_TO_DEFAULT_BUILD 1)
 endif()
+
+# Find opencl and enable it if possible
+FIND_PACKAGE(OpenCL)
+if (OpenCL_FOUND)
+	add_definitions(-DOPENCL_SUPPORTED)
+endif()
