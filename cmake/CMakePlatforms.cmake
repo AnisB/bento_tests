@@ -15,10 +15,14 @@ if( ${CMAKE_SYSTEM_NAME} STREQUAL "Windows" )
 	set(PLATFORM_WINDOWS 1)
 	set(PLATFORM_NAME "windows")
 	add_definitions(-DWINDOWSPC)
+	set(BENTO_THIRD_INCLUDE_DIRS "${PROJECT_SOURCE_DIR}/3rd/win32/include")
+	set(BENTO_THIRD_LIBRARY_DIRS "${PROJECT_SOURCE_DIR}/3rd/win32/lib")
 elseif( ${CMAKE_SYSTEM_NAME} STREQUAL "Linux" )
 	set(PLATFORM_LINUX 1)
 	set(PLATFORM_NAME "linux")
 	add_definitions(-DLINUXPC)
+	set(BENTO_THIRD_INCLUDE_DIRS "")
+	set(BENTO_THIRD_LIBRARY_DIRS "")
 endif()
 
 message(STATUS "Detected platform: ${PLATFORM_NAME}")
@@ -44,3 +48,22 @@ FIND_PACKAGE(OpenCL)
 if (OpenCL_FOUND)
 	add_definitions(-DOPENCL_SUPPORTED)
 endif()
+
+# Find vulkan and enable it if possible
+FIND_PACKAGE(Vulkan)
+if (Vulkan_FOUND)
+	add_definitions(-DVULKAN_SUPPORTED)
+endif()
+
+# Find GLEW and enable it if possible
+FIND_PACKAGE(GLEW)
+if (GLEW_FOUND)
+	add_definitions(-DGLEW_SUPPORTED)
+endif()
+
+# Find GLFW and enable it if possible
+FIND_PACKAGE(GLFW)
+if (GLFW_FOUND)
+	add_definitions(-DGLFW_SUPPORTED)
+endif()
+
