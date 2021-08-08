@@ -10,3 +10,8 @@ if (OpenCL_FOUND)
 	bento_exe("compute_tester" "tests" "compute_tester.cpp" "${BENTO_SDK_INCLUDE};${BENTO_TESTS_3RD_INCLUDE}")
 	target_link_libraries("compute_tester" "bento_sdk" "${OpenCL_LIBRARIES}")
 endif()
+
+if (VULKAN_FOUND)
+	bento_exe("vulkan_tester" "tests" "vulkan_tester.cpp" "${BENTO_SDK_INCLUDE};${BENTO_TESTS_3RD_INCLUDE}")
+	target_link_libraries("vulkan_tester" "bento_sdk" "${Vulkan_LIBRARIES}" "${GLFW_LIBRARY}")
+endif()
