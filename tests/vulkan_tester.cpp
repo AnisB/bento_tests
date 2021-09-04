@@ -16,7 +16,22 @@ int main()
 
 	// Create the render environment
 	bento::RenderEnvironment renderEnv = bento::vulkan::render_system::create_render_environment(1280, 720, "vulkan_tester", currentAllocator);
+
+	// Create the command buffer
+	bento::CommandBuffer commandBuffer = bento::vulkan::command_buffer::create(renderEnv, currentAllocator);
+
+	// Start to record the command buffer
+	bento::vulkan::command_buffer::start_record(commandBuffer);
+
+	// Wait 5000 milliseconds
+	SLEEP_FUNCTION(5000);
 	
+	// Stop to record the command buffer
+	bento::vulkan::command_buffer::stop_record(commandBuffer);
+
+	// Destroy the command buffer
+	bento::vulkan::command_buffer::destroy(commandBuffer);
+
 	// Destroy the render environment
 	bento::vulkan::render_system::destroy_render_environment(renderEnv);
 
