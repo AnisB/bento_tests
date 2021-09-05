@@ -5,6 +5,7 @@
 #include <bento_memory/page_allocator.h>
 #include <bento_memory/book_allocator.h>
 #include <bento_memory/safe_system_allocator.h>
+#include <bento_collection/dynamic_string.h>
 
 struct TByte4
 {
@@ -335,6 +336,13 @@ void test_safe_system_allocator()
 		vc16.free();
 		vc16.resize(8);
 		assert_memory_usage(safeMemoryAllocator, (sizeof(TByte4) * 8 + sizeof(TByte8) * 8 + sizeof(TByte16) * 8 + headerSize * 3), (sizeof(TByte4) * 12 + sizeof(TByte8) * 12 + sizeof(TByte16) * 12 + headerSize * 6), (sizeof(TByte4) * 4 + sizeof(TByte8) * 4 + sizeof(TByte16) * 4 + headerSize * 3));
+	}
+
+	{
+		bento::SafeSystemAllocator safeMemoryAllocator;
+		bento::DynamicString* string = bento::make_new<bento::DynamicString>(safeMemoryAllocator, safeMemoryAllocator);
+		string->resize(1000);
+		bento::make_delete<bento::DynamicString>(safeMemoryAllocator, string);
 	}
 }
 
