@@ -1,258 +1,216 @@
-// SDK includes
+// bento includes
 #include <bento_base/log.h>
-#include <bento_collection/vector.h>
 #include <bento_base/security.h>
-#include <bento_compute/compute_api.h>
-#include <bento_math/types.h>
 #include <bento_memory/safe_system_allocator.h>
+#include <bento_collection/vector.h>
+#include <bento_collection/dynamic_string.h>
+#include <bento_compute/compute_api.h>
 
-void square_number_test(bento::ComputeContext context, bento::ComputeCommandList commandList, bento::IAllocator& currentAllocator)
-{
-	const char* squareKernel = "\
-	__kernel void process(__global uint* A, __global uint* B, const uint num_elements)\
+// external includes
+#include <algorithm>
+#include <string>
+
+const char* TestKernel1D = "\
+__kernel void process(__global float* A, __global float* B, const uint elements_per_tile, const uint num_elements)\
+{\
+	int tileIndex = get_group_id(0);\
+	for (int i = 0; i < elements_per_tile; ++i)\
 	{\
-		int id = get_global_id(0);\
-		int num_workers = get_global_size(0);\
-	\
-		for (int i = id; i < num_elements; i += num_workers)\
-		{\
-			B[i] = A[i] * A[i];\
-		}\
-	}";
+		int globalIndex = tileIndex * elements_per_tile + i;\
+		if (globalIndex >= num_elements)\
+			break;\
+		B[globalIndex] = pow(A[globalIndex], 2.4f);\
+	}\
+}";
 
-	// Define a number of element to process
-	const uint32_t num_elements = 1000000;
-
-	// Create and write init value buffer
-	bento::ComputeBuffer input_buffer = create_buffer(context, num_elements * sizeof(float), bento::ComputeBufferType::READ_ONLY, currentAllocator);
+void test_kernel_1d(bento::ComputeContext context, bento::ComputeCommandList commandList, bento::ComputeKernel kernel, uint32_t numElements, bento::IAllocator& allocator)
+{
+	// Evaluate the dispatch parameters (one thread per tile)
+	uint32_t tileSize = std::min(bento::dispatch_tile_size(context), (uint32_t)1024);
+	uint32_t tileCount = (numElements + (tileSize - 1)) / tileSize;
 
 	// Create init values
-	bento::Vector<uint32_t> input_values(currentAllocator, num_elements);
-	for (uint32_t data_idx = 0; data_idx < num_elements; ++data_idx)
-		input_values[data_idx] = data_idx;
+	bento::Vector<float> input_values(allocator, numElements);
+	for (uint32_t data_idx = 0; data_idx < numElements; ++data_idx)
+	{
+		input_values[data_idx] = (float)data_idx;
+	}
 
+	// Create and write init value buffer
+	bento::ComputeBuffer input_buffer = bento::create_buffer(context, numElements * sizeof(float), bento::ComputeBufferType::READ_ONLY, allocator);
 	bento::write_buffer(commandList, input_buffer, (unsigned char*)&input_values[0]);
 
 	// Create an output buffer
-	bento::ComputeBuffer output_buffer = create_buffer(context, num_elements * sizeof(float), bento::ComputeBufferType::WRITE_ONLY, currentAllocator);
-
-	// Create a program and a kernel
-	bento::ComputeProgram program = bento::create_program_source(context, squareKernel);
-	bento::ComputeKernel kernel = bento::create_kernel(program, "process");
+	bento::ComputeBuffer output_buffer = bento::create_buffer(context, numElements * sizeof(float), bento::ComputeBufferType::WRITE_ONLY, allocator);
 
 	// Sent the arguments
 	bento::kernel_argument(kernel, 0, input_buffer);
 	bento::kernel_argument(kernel, 1, output_buffer);
-	bento::kernel_argument(kernel, 2, sizeof(unsigned int), (unsigned char*)&num_elements);
+	bento::kernel_argument(kernel, 2, sizeof(unsigned int), (unsigned char*)&tileSize);
+	bento::kernel_argument(kernel, 3, sizeof(unsigned int), (unsigned char*)&numElements);
 
-	// Launch the kernel
-	bento::dispatch_kernel_1D(commandList, kernel, num_elements);
+	// Dispatch the task on the GPU
+	bento::IVector3 numTilesParam = { tileCount, 1, 1 };
+	bento::IVector3 tileSizes = { tileSize, 1, 1 };
+	dispatch_kernel(commandList, kernel, numTilesParam, tileSizes);
 
 	// Wait for the kernel to finish
 	bento::flush_command_list(commandList);
 
 	// Read the output values
-	bento::Vector<uint32_t> output_values(currentAllocator, num_elements);
+	bento::Vector<float> output_values(allocator, numElements);
 	bento::read_buffer(commandList, output_buffer, (unsigned char*)&output_values[0]);
 
 	// Check the results
-	for (uint32_t element_idx = 0; element_idx < num_elements; ++element_idx)
-		assert((input_values[element_idx] * input_values[element_idx]) == output_values[element_idx]);
+	// Check the results
+	bool failed = false;
+	for (uint32_t element_idx = 0; element_idx < numElements; ++element_idx)
+	{
+		float expectedValue = std::powf(input_values[element_idx], 2.4f);
+		float gpuValue = output_values[element_idx];
+		failed |= (abs(expectedValue - gpuValue) > expectedValue * 0.00001);
+		if (failed)
+			break;
+	}
+	assert(!failed);
 
-	// Release the kernel and program
-	bento::destroy_kernel(kernel);
-	bento::destroy_program(program);
-
-	// Release all the resources
+	// Release all the compute resources
 	bento::destroy_buffer(output_buffer);
 	bento::destroy_buffer(input_buffer);
 }
 
-void divide_number_test(bento::ComputeContext context, bento::ComputeCommandList commandList, bento::IAllocator& currentAllocator)
-{
-	const char* divideKernel = "\
-	__kernel void process(__global double* A, __global double* B, __global double* C, const uint num_elements)\
+const char* TestKernel2D = "\
+__kernel void process(__global float* A, __global float* B, const uint elements_per_tile, const uint elements_per_thread, const uint num_elements)\
+{\
+	/*Tile data*/\
+	int tileIndex = get_group_id(1) * get_num_groups(0) + get_group_id(0);\
+\
+	/*If this tile has nothing to compute, just skip*/\
+	int tileOffset = tileIndex * elements_per_tile;\
+	if (tileOffset >= num_elements)\
+		return;\
+\
+	/*Thread data*/\
+	int threadIndex = get_local_linear_id();\
+\
+	/*If this thread has nothing to compute, just skip*/\
+	int threadOffset = threadIndex * elements_per_thread;\
+	if (threadOffset >= elements_per_tile)\
+		return;\
+\
+	/*Loop through the elements this thread has to compute*/\
+	for (int i = 0; i < elements_per_thread; ++i)\
 	{\
-		int id = get_global_id(0);\
-		int num_workers = get_global_size(0);\
-	\
-		for (int i = id; i < num_elements; i += num_workers)\
-		{\
-			C[i] = A[i] / B[i];\
-		}\
-	}";
+		int localIndex = threadOffset + i;\
+		if (localIndex >= elements_per_tile)\
+			break;\
+\
+		/*Compute the global*/\
+		int globalIndex = tileOffset + localIndex;\
+\
+		/*Run the calculus*/\
+		B[globalIndex] = pow(A[globalIndex], 2.7f);\
+	}\
+}";
 
-	// Define a number of element to process
-	const uint32_t num_elements = 4000000;
-
-	// Create and write init value buffers
-	bento::ComputeBuffer input_buffer_0 = create_buffer(context, num_elements * sizeof(double), bento::ComputeBufferType::READ_ONLY, currentAllocator);
-	bento::ComputeBuffer input_buffer_1 = create_buffer(context, num_elements * sizeof(double), bento::ComputeBufferType::READ_ONLY, currentAllocator);
+// For this test, I am going with a 4x4 tile and 4 elements per thread to process
+// this means each tile can process up to 64 elements
+void test_kernel_2d(bento::ComputeContext context, bento::ComputeCommandList commandList, bento::ComputeKernel kernel, bento::IAllocator& allocator)
+{
+	// This implementation is for 16m elements
+	uint32_t numElements = 1000000;
+	uint32_t numElementsPerTileRow = 512;
+	uint32_t elementsPerTile = 61;
+	uint32_t elementsPerThread = 4;
 
 	// Create init values
-	bento::Vector<double> input_values_0(currentAllocator, num_elements);
-	bento::Vector<double> input_values_1(currentAllocator, num_elements);
-	for (uint32_t data_idx = 0; data_idx < num_elements; ++data_idx)
+	bento::Vector<float> input_values(allocator, numElements);
+	for (uint32_t data_idx = 0; data_idx < numElements; ++data_idx)
 	{
-		input_values_0[data_idx] = (double)data_idx;
-		input_values_1[data_idx] = (double)data_idx * data_idx;
+		input_values[data_idx] = (float)data_idx;
 	}
-
-	// Write them to the gpu
-	bento::write_buffer(commandList, input_buffer_0, (void*)&input_values_0[0]);
-	bento::write_buffer(commandList, input_buffer_1, (void*)&input_values_1[0]);
+	// Create and write init value buffer
+	bento::ComputeBuffer input_buffer = bento::create_buffer(context, numElements * sizeof(float), bento::ComputeBufferType::READ_ONLY, allocator);
+	bento::write_buffer(commandList, input_buffer, (unsigned char*)&input_values[0]);
 
 	// Create an output buffer
-	bento::ComputeBuffer output_buffer = create_buffer(context, num_elements * sizeof(double), bento::ComputeBufferType::WRITE_ONLY, currentAllocator);
-
-	// Create a program and a kernel
-	bento::ComputeProgram program = bento::create_program_source(context, divideKernel);
-	bento::ComputeKernel kernel = bento::create_kernel(program, "process");
+	bento::ComputeBuffer output_buffer = bento::create_buffer(context, numElements * sizeof(float), bento::ComputeBufferType::WRITE_ONLY, allocator);
 
 	// Sent the arguments
-	bento::kernel_argument(kernel, 0, input_buffer_0);
-	bento::kernel_argument(kernel, 1, input_buffer_1);
-	bento::kernel_argument(kernel, 2, output_buffer);
-	bento::kernel_argument(kernel, 3, sizeof(unsigned int), (void*)&num_elements);
+	bento::kernel_argument(kernel, 0, input_buffer);
+	bento::kernel_argument(kernel, 1, output_buffer);
+	bento::kernel_argument(kernel, 2, sizeof(unsigned int), (unsigned char*)&elementsPerTile);
+	bento::kernel_argument(kernel, 3, sizeof(unsigned int), (unsigned char*)&elementsPerThread);
+	bento::kernel_argument(kernel, 4, sizeof(unsigned int), (unsigned char*)&numElements);
 
-	// Launch the kernel
-	bento::dispatch_kernel_1D(commandList, kernel, num_elements);
+	// Dispatch the task on the GPU
+	bento::IVector3 numTilesParam = { numElementsPerTileRow, numElementsPerTileRow, 1 };
+	bento::IVector3 tileSize = { 4, 4, 1 };
+	dispatch_kernel(commandList, kernel, numTilesParam, tileSize);
 
 	// Wait for the kernel to finish
 	bento::flush_command_list(commandList);
 
 	// Read the output values
-	bento::Vector<double> output_values(currentAllocator, num_elements);
+	bento::Vector<float> output_values(allocator, numElements);
 	bento::read_buffer(commandList, output_buffer, (unsigned char*)&output_values[0]);
 
 	// Check the results
-	for (uint32_t element_idx = 0; element_idx < num_elements; ++element_idx)
-		assert((input_values_0[element_idx] / input_values_1[element_idx]) == output_values[element_idx]);
+	bool failed = false;
+	for (uint32_t element_idx = 0; element_idx < numElements; ++element_idx)
+	{
+		float expectedValue = std::powf(input_values[element_idx], 2.7f);
+		float gpuValue = output_values[element_idx];
+		failed |= (abs(expectedValue - gpuValue) > expectedValue * 0.00001);
+		if (failed)
+			break;
+	}
+	assert(!failed);
 
-	// Release the kernel and program
-	bento::destroy_kernel(kernel);
-	bento::destroy_program(program);
-
-	// Release all the resources
+	// Release all the compute resources
 	bento::destroy_buffer(output_buffer);
-	bento::destroy_buffer(input_buffer_0);
-	bento::destroy_buffer(input_buffer_1);
-}
-
-float rand_01()
-{
-	return (float)(rand() % RAND_MAX) / RAND_MAX;
-}
-
-void particle_test(bento::ComputeContext context, bento::ComputeCommandList commandList, bento::IAllocator& currentAllocator)
-{
-	const char* particleKernel = "\
-		typedef struct __attribute__((packed))\
-		{\
-			float4 pos;\
-			float4 velocity;\
-		} TParticleDescriptor;\
-		\
-		__kernel void update(__global TParticleDescriptor* particleArray, const float deltaTime, const int numParticles)\
-		{\
-			int id = get_global_id(0);\
-			int num_workers = get_global_size(0);\
-			for (int i = id; i < numParticles; i += num_workers)\
-			{\
-				particleArray[i].pos = particleArray[i].pos + particleArray[i].velocity * deltaTime; \
-			}\
-		}";
-
-	// Define a number of element to process
-	const uint32_t numParticles = 1000000;
-
-	// Internal particle descriptor
-	struct TParticleDescriptor
-	{
-		bento::Vector4 pos;
-		bento::Vector4 velocity;
-	};
-
-	// Initialize the random number generation
-	srand(666);
-
-	// Create and write init value buffer
-	bento::ComputeBuffer particleBuffer = create_buffer(context, numParticles * sizeof(TParticleDescriptor), bento::ComputeBufferType::READ_WRITE, currentAllocator);
-
-	// Create init values
-	bento::Vector<TParticleDescriptor> inputParticles(currentAllocator, numParticles);
-	for (uint32_t particleIdx = 0; particleIdx < numParticles; ++particleIdx)
-	{
-		inputParticles[particleIdx].pos.x = rand_01() * 2.0f - 1.0f;
-		inputParticles[particleIdx].pos.y = rand_01() * 2.0f - 1.0f;
-		inputParticles[particleIdx].pos.z = rand_01() * 2.0f - 1.0f;
-		inputParticles[particleIdx].velocity.x = rand_01() * 2.0f - 1.0f;
-		inputParticles[particleIdx].velocity.y = rand_01() * 2.0f - 1.0f;
-		inputParticles[particleIdx].velocity.z = rand_01() * 2.0f - 1.0f;
-	}
-
-	bento::write_buffer(commandList, particleBuffer, (void*)&inputParticles[0]);
-
-	// Create a program and a kernel
-	bento::ComputeProgram program = bento::create_program_source(context, particleKernel);
-	bento::ComputeKernel kernel = bento::create_kernel(program, "update");
-
-	// Update duration
-	const float deltaTime = 1.0;
-
-	// Sent the arguments
-	bento::kernel_argument(kernel, 0, particleBuffer);
-	bento::kernel_argument(kernel, 1, sizeof(deltaTime), (void*)&deltaTime);
-	bento::kernel_argument(kernel, 2, sizeof(unsigned int), (unsigned char*)&numParticles);
-
-	// Launch the kernel
-	bento::dispatch_kernel_1D(commandList, kernel, numParticles);
-
-	// Wait for the kernel to finish
-	bento::flush_command_list(commandList);
-
-	// Read the output values
-	bento::Vector<TParticleDescriptor> outputParticles(currentAllocator, numParticles);
-	bento::read_buffer(commandList, particleBuffer, (unsigned char*)&outputParticles[0]);
-
-	// Check the results
-	for (uint32_t element_idx = 0; element_idx < numParticles; ++element_idx)
-	{
-		assert((inputParticles[element_idx].pos.x + inputParticles[element_idx].velocity.x * deltaTime) == outputParticles[element_idx].pos.x);
-		assert((inputParticles[element_idx].pos.y + inputParticles[element_idx].velocity.y * deltaTime) == outputParticles[element_idx].pos.y);
-		assert((inputParticles[element_idx].pos.z + inputParticles[element_idx].velocity.z * deltaTime) == outputParticles[element_idx].pos.z);
-	}
-
-	// Release the kernel and program
-	bento::destroy_kernel(kernel);
-	bento::destroy_program(program);
-
-	// Release all the resources
-	bento::destroy_buffer(particleBuffer);
+	bento::destroy_buffer(input_buffer);
 }
 
 int main()
 {
 	// Allocator used for this program
-	bento::SafeSystemAllocator currentAllocator;
+	bento::SafeSystemAllocator allocator;
 
 	// Create a compute context
-	bento::ComputeContext context = create_compute_context(currentAllocator);
+	bento::ComputeContext context = bento::create_compute_context(allocator);
 
 	// Create a command list
-	bento::ComputeCommandList commandList = create_command_list(context, currentAllocator);
+	bento::ComputeCommandList commandList = bento::create_command_list(context, allocator);
 
-	// Run the tests
-	square_number_test(context, commandList, currentAllocator);
-	divide_number_test(context, commandList, currentAllocator);
-	particle_test(context, commandList, currentAllocator);
+	// Run all the variations of the test
+	bento::ComputeProgram program1D = bento::create_program_source(context, TestKernel1D);
+	bento::ComputeKernel kernel1D = bento::create_kernel(program1D, "process");
+	test_kernel_1d(context, commandList, kernel1D, 1, allocator);
+	test_kernel_1d(context, commandList, kernel1D, 100, allocator);
+	test_kernel_1d(context, commandList, kernel1D, 1024, allocator);
+	test_kernel_1d(context, commandList, kernel1D, 1025, allocator);
+	test_kernel_1d(context, commandList, kernel1D, 100000, allocator);
+	bento::destroy_kernel(kernel1D);
+	bento::destroy_program(program1D);
 
-	// Destroy the command list
+	// run the 2d test
+	bento::ComputeProgram program2D = bento::create_program_source(context, TestKernel2D);
+	bento::ComputeKernel kernel2D = bento::create_kernel(program2D, "process");
+	test_kernel_2d(context, commandList, kernel2D, allocator);
+	bento::destroy_kernel(kernel2D);
+	bento::destroy_program(program2D);
+
+	// Destroy all the compute structures
 	bento::destroy_command_list(commandList);
-
-	// Destroy the compute context
 	bento::destroy_compute_context(context);
 
-	// If we get here everything is fine
+	// Display the total allocated memory
+	bento::default_logger()->log(bento::LogLevel::info, "Total Allocated memory", std::to_string(allocator.total_memory_allocated()).c_str());
+
+	// Display the success of the test
+	bento::default_logger()->log(bento::LogLevel::info, "TESTS", "Compute string succeeded.");
+
+	// AAAAND we're done
 	return 0;
 }
